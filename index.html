@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar de preços</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--card:#f4f4f2;--line:#ddd;--ok:#0a7d3b;--warn:#b45309;--acc:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#eee;--mut:#9a9a9a;--card:#222;--line:#333;--ok:#4ade80;--warn:#fbbf24;--acc:#60a5fa}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif;padding:14px;max-width:760px;margin-inline:auto}
+h1{font-size:1.3rem;margin:.2rem 0}.mut{color:var(--mut);font-size:.85rem}
+input{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font-size:1rem;margin:10px 0}
+.card{background:var(--card);border-radius:12px;padding:12px;margin:10px 0}
+.top{display:flex;justify-content:space-between;gap:8px;align-items:baseline;cursor:pointer}
+.price{font-weight:700;font-size:1.15rem}.tag{font-size:.75rem;padding:2px 7px;border-radius:99px;border:1px solid currentColor}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.det{display:none;margin-top:10px}.open .det{display:block}
+table{width:100%;border-collapse:collapse;font-size:.88rem}td{padding:6px 4px;border-top:1px solid var(--line);vertical-align:top}
+td.p{white-space:nowrap;text-align:right;font-weight:600}a{color:var(--acc)}canvas{max-height:220px}
+</style>
+</head>
+<body>
+<h1>Radar de preços</h1>
+<div class="mut" id="upd">Carregando…</div>
+<input id="q" placeholder="Filtrar produto (ex.: 5060)" type="search">
+<div id="list"></div>
+<div class="mut" id="src" style="margin-top:16px"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const brl=v=>v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safe=u=>/^https?:\/\//.test(u)?u:'#';
+let L=null,H={},charts={};
+async function load(){
+  try{
+    L=await (await fetch('data/latest.json',{cache:'no-store'})).json();
+    try{H=await (await fetch('data/history.json',{cache:'no-store'})).json();}catch(e){H={};}
+    render();
+  }catch(e){document.getElementById('upd').textContent='Ainda não há dados. Rode o workflow “Coletar preços” na aba Actions do GitHub.';}
+}
+function render(){
+  const d=new Date(L.atualizado);
+  document.getElementById('upd').textContent='Atualizado em '+d.toLocaleString('pt-BR');
+  const q=document.getElementById('q').value.trim().toLowerCase();
+  const box=document.getElementById('list');box.innerHTML='';
+  L.itens.filter(i=>!q||i.nome.toLowerCase().includes(q)).forEach(it=>{
+    const real=it.ofertas.filter(o=>!o.suspeito);
+    const best=real[0];
+    const hist=(H[it.id]||[]).map(r=>r.p);
+    const minHist=hist.length?Math.min(...hist):null;
+    const card=document.createElement('div');card.className='card';
+    let tag='';
+    if(best&&it.alvo&&best.price<=it.alvo)tag='<span class="tag ok">abaixo do alvo</span>';
+    else if(best&&minHist!==null&&best.price<=minHist)tag='<span class="tag ok">menor preço registrado</span>';
+    card.innerHTML=`<div class="top"><div><b>${esc(it.nome)}</b><div class="mut">${best?esc(best.store):'sem ofertas agora'}${it.alvo?' · alvo '+brl(it.alvo):''}</div></div><div style="text-align:right"><div class="price">${best?brl(best.price):'—'}</div>${tag}</div></div>
+    <div class="det">${minHist!==null?`<div class="mut">Menor preço registrado por aqui: ${brl(minHist)}${it.historico_ref?' · referência vista: '+brl(it.historico_ref):''}</div>`:''}
+    <canvas id="c-${esc(it.id)}"></canvas>
+    <table>${it.ofertas.map(o=>`<tr><td><a href="${esc(safe(o.url))}" target="_blank" rel="noopener noreferrer">${esc(o.title)}</a><div class="mut">${esc(o.store)}${o.suspeito?' · <span class="warn">preço suspeito, confira</span>':''}</div></td><td class="p">${brl(o.price)}</td></tr>`).join('')}</table></div>`;
+    card.querySelector('.top').onclick=()=>{card.classList.toggle('open');if(card.classList.contains('open'))chart(it);};
+    box.appendChild(card);
+  });
+  const s=L.fontes||{};
+  document.getElementById('src').innerHTML='Fontes: '+Object.entries(s).map(([k,v])=>`${esc(k)} ${v.ok?'✓':'✗'}${v.erro?' ('+v.erro+' falhas)':''}`).join(' · ');
+}
+function chart(it){
+  const id='c-'+it.id;if(charts[id]||!window.Chart)return;
+  const rows=H[it.id]||[];if(!rows.length)return;
+  const days=[...new Set(rows.map(r=>r.d))].sort();
+  const stores=[...new Set(rows.map(r=>r.s))];
+  const ds=stores.map(s=>({label:s,spanGaps:true,tension:.2,data:days.map(d=>{const r=rows.find(x=>x.d===d&&x.s===s);return r?r.p:null;})}));
+  if(it.alvo)ds.push({label:'Alvo',borderDash:[6,4],pointRadius:0,data:days.map(()=>it.alvo)});
+  charts[id]=new Chart(document.getElementById(id),{type:'line',data:{labels:days,datasets:ds},options:{responsive:true,plugins:{legend:{position:'bottom'}}}});
+}
+document.getElementById('q').oninput=()=>L&&render();
+load();
+</script>
+</body>
+</html>
