@@ -1,0 +1,12 @@
+[
+  {"id":"rtx-5060","nome":"RTX 5060","busca":"rtx 5060","deve_conter":["5060"],"excluir":["ti","notebook","laptop","pc gamer","kit","waterblock","suporte","cabo"],"preco_min":1200,"alvo":2500,"historico_ref":2100},
+  {"id":"rtx-5060-ti","nome":"RTX 5060 Ti","busca":"rtx 5060 ti","deve_conter":["5060","ti"],"excluir":["notebook","laptop","pc gamer","kit","suporte","cabo"],"preco_min":1800},
+  {"id":"rx-9060-xt","nome":"RX 9060 XT","busca":"rx 9060 xt","deve_conter":["9060"],"excluir":["notebook","pc gamer","kit","suporte","cabo"],"preco_min":1800},
+  {"id":"ryzen-5-5600","nome":"Ryzen 5 5600","busca":"ryzen 5 5600","deve_conter":["5600"],"excluir":["5600g","5600x","5600gt","notebook","pc gamer","kit","placa"],"preco_min":400},
+  {"id":"ryzen-7-5700x3d","nome":"Ryzen 7 5700X3D","busca":"ryzen 7 5700x3d","deve_conter":["5700x3d"],"excluir":["notebook","pc gamer","kit"],"preco_min":800},
+  {"id":"ram-ddr4-16gb","nome":"Memória DDR4 16GB","busca":"memoria ddr4 16gb","deve_conter":["ddr4","16gb"],"excluir":["notebook","sodimm","so-dimm","kit 2x","2x16"],"preco_min":100},
+  {"id":"ram-ddr5-32gb","nome":"Memória DDR5 32GB","busca":"memoria ddr5 32gb","deve_conter":["ddr5","32gb"],"excluir":["notebook","sodimm","so-dimm"],"preco_min":300},
+  {"id":"ssd-nvme-1tb","nome":"SSD NVMe 1TB","busca":"ssd nvme 1tb","deve_conter":["nvme","1tb"],"excluir":["externo","notebook","case","gabinete","adaptador"],"preco_min":150},
+  {"id":"fonte-650w","nome":"Fonte 650W 80 Plus","busca":"fonte 650w 80 plus","deve_conter":["650w"],"excluir":["notebook","carregador","cabo"],"preco_min":180},
+  {"id":"placa-mae-b550","nome":"Placa-mãe B550","busca":"placa mae b550","deve_conter":["b550"],"excluir":["notebook","kit","processador"],"preco_min":400}
+]
