@@ -21,6 +21,52 @@ def norm(s):
     return "".join(c for c in s if not unicodedata.combining(c)).lower()
 
 
+_diag_done = set()
+
+
+def diag(store, html):
+    """Registra no log por que uma loja não retornou ofertas (uma vez por loja)."""
+    if store in _diag_done:
+        return
+    _diag_done.add(store)
+    t = re.search(r"<title[^>]*>(.*?)</title>", html, re.S)
+    print(f"[diag {store}] {len(html)}B titulo={(t.group(1).strip()[:60] if t else '-')!r} "
+          f"poly={html.count('poly-component__title')} ld={html.count('ld+json')} "
+          f"next={html.count('__NEXT_DATA__')} preco={html.count('andes-money-amount__fraction')}")
+
+
+def ld_products(html, store, base):
+    """Lê produtos em JSON-LD (schema.org Product), formato comum em lojas."""
+    out = []
+    for m in re.finditer(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', html, re.S):
+        try:
+            data = json.loads(m.group(1))
+        except Exception:
+            continue
+        stack = [data]
+        while stack:
+            o = stack.pop()
+            if isinstance(o, list):
+                stack.extend(o)
+            elif isinstance(o, dict):
+                t = o.get("@type")
+                if (t == "Product" or (isinstance(t, list) and "Product" in t)) and o.get("name"):
+                    offers = o.get("offers") or {}
+                    if isinstance(offers, list):
+                        offers = offers[0] if offers else {}
+                    price = offers.get("price") or offers.get("lowPrice") if isinstance(offers, dict) else None
+                    url = o.get("url") or (offers.get("url") if isinstance(offers, dict) else None)
+                    try:
+                        price = float(price)
+                    except (TypeError, ValueError):
+                        price = None
+                    if price and url:
+                        out.append({"store": store, "title": str(o["name"]), "price": price,
+                                    "url": urllib.parse.urljoin(base, url).split("#")[0]})
+                stack.extend(o.values())
+    return out
+
+
 # ---------- Mercado Livre (páginas públicas) ----------
 TOKEN = re.compile(
     r'class="(andes-money-amount(?!_)[^"]*)"'
@@ -58,17 +104,22 @@ def parse_ml(html):
 
 def src_ml(query):
     slug = "-".join(norm(query).split())
-    return parse_ml(get(f"https://lista.mercadolivre.com.br/{urllib.parse.quote(slug)}"))
+    base = "https://lista.mercadolivre.com.br/"
+    html = get(base + urllib.parse.quote(slug))
+    offers = parse_ml(html) or ld_products(html, "Mercado Livre", base)
+    if not offers:
+        diag("Mercado Livre", html)
+    return offers
 
 
-# ---------- KaBuM (API interna, leitura tolerante) ----------
+# ---------- KaBuM (página de busca pública) ----------
 def walk(o, acc):
     if isinstance(o, dict):
         name = o.get("name") or o.get("title")
-        price = o.get("price_with_discount") or o.get("priceWithDiscount") or o.get("price")
+        price = o.get("priceWithDiscount") or o.get("price_with_discount") or o.get("price")
         code = o.get("code") or o.get("id")
-        if isinstance(name, str) and isinstance(price, (int, float)) and price > 0:
-            acc.append((name, float(price), code, o.get("friendly_name") or o.get("slug")))
+        if isinstance(name, str) and isinstance(price, (int, float)) and price > 0 and code:
+            acc.append((name, float(price), code))
         for v in o.values():
             walk(v, acc)
     elif isinstance(o, list):
@@ -77,15 +128,22 @@ def walk(o, acc):
 
 
 def src_kabum(query):
-    q = urllib.parse.quote(query)
-    raw = get("https://servicespub.prod.kabum.com.br/search/v3/products?query=" + q +
-              "&page_number=1&page_size=20&sort=most_searched")
-    acc = []
-    walk(json.loads(raw), acc)
+    slug = "-".join(norm(query).split())
+    base = "https://www.kabum.com.br/"
+    html = get(base + "busca/" + urllib.parse.quote(slug))
     out = []
-    for name, price, code, slug in acc:
-        url = f"https://www.kabum.com.br/produto/{code}" if code else "https://www.kabum.com.br"
-        out.append({"store": "KaBuM", "title": name, "price": price, "url": url})
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if m:
+        try:
+            acc = []
+            walk(json.loads(m.group(1)), acc)
+            out = [{"store": "KaBuM", "title": n, "price": p, "url": f"{base}produto/{c}"}
+                   for n, p, c in acc]
+        except Exception:
+            out = []
+    out = out or ld_products(html, "KaBuM", base)
+    if not out:
+        diag("KaBuM", html)
     return out
 
 
@@ -94,7 +152,6 @@ SOURCES = {"Mercado Livre": src_ml, "KaBuM": src_kabum}
 
 def relevant(offer, item):
     t = norm(offer["title"])
-    words = set(re.findall(r"[a-z0-9]+", t))
     if not all(norm(w) in t for w in item.get("deve_conter", [])):
         return False
     if any(re.search(r"(?<![a-z0-9])" + re.escape(norm(w)) + r"(?![a-z0-9])", t)
@@ -135,10 +192,10 @@ def main():
             o["suspeito"] = bool(median and o["price"] < 0.6 * median)
         h = history.setdefault(item["id"], [])
         for store in {o["store"] for o in uniq}:
-            best = min(o["price"] for o in uniq if o["store"] == store and not o["suspeito"]
-                       ) if any(o["store"] == store and not o["suspeito"] for o in uniq) else None
-            if best is None:
+            ok = [o["price"] for o in uniq if o["store"] == store and not o["suspeito"]]
+            if not ok:
                 continue
+            best = min(ok)
             row = next((r for r in h if r["d"] == today and r["s"] == store), None)
             if row:
                 row["p"] = min(row["p"], best)
@@ -149,8 +206,6 @@ def main():
 
     if total == 0:
         print("Nenhuma oferta coletada; mantendo dados anteriores.", json.dumps(status, ensure_ascii=False))
-        (DATA / "status.json").write_text(json.dumps({"atualizado": now.isoformat(), "fontes": status},
-                                                      ensure_ascii=False, indent=1), encoding="utf-8")
         sys.exit(1)
 
     (DATA / "latest.json").write_text(json.dumps(
